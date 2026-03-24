@@ -34,8 +34,8 @@ def build_filter_groups():
     base_filters = [
         {"propertyName": "createdate", "operator": "GTE", "value": str(thirty_days_ago_ms)}
     ]
-    for keyword in EXCLUDED_DOMAIN_KEYWORDS:
-        base_filters.append({"propertyName": "email", "operator": "NOT_CONTAINS_TOKEN", "value": keyword})
+    # Domain exclusions are applied in Python (is_excluded()) after fetching.
+    # HubSpot limits filter groups to 6 filters, so we keep only essential filters here.
 
     group_a = {
         "filters": base_filters + [
