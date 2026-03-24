@@ -3,15 +3,16 @@ BEAMON - Signups by Email Domain checker
 Replicates the HubSpot report filters and alerts #sales_inbound on Slack
 when a new email domain appears in the results.
 
-Filters applied (matching the HubSpot report exactly):
-  1. Create date updated in the last 30 days
+Filters applied (matching the HubSpot report):
+  1. Create date in the last 30 days
   2. Email domain doesn't contain: gmail, hotmail, bryter, icloud, googlemail, outlook.com
-  3. Recent conversion contains: "hubspot signup", "hubspot-signup", "BRYTER: F130"
+  3. Recent conversion CONTAINS any of: "hubspot signup", "hubspot-signup", "BRYTER: F130"
      OR Recent conversion is unknown (null or empty)
 
 All 3 filters are applied in Python after fetching from the API.
-The API query uses only the createdate filter to stay within HubSpot's
-6-filter-per-group limit, then Python replicates filters 2 and 3 exactly.
+Filter 3 uses substring matching (like HubSpot's "contains" operator).
+
+Slack alerts are only sent for new domains with >= 3 contacts in the report.
 """
 
 import os
@@ -24,17 +25,20 @@ SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "")
 STATE_FILE = "known_domains.json"
 
 EXCLUDED_DOMAIN_KEYWORDS = ["gmail", "hotmail", "bryter", "icloud", "googlemail", "outlook.com"]
-ALLOWED_CONVERSIONS = {"hubspot signup", "hubspot-signup", "bryter: f130"}
+# HubSpot "contains" is substring matching - we replicate that here
+ALLOWED_CONVERSION_SUBSTRINGS = ["hubspot signup", "hubspot-signup", "bryter: f130"]
+# Only alert for domains with this many contacts or more
+MIN_CONTACTS_FOR_ALERT = 3
 REPORT_URL = "https://app-eu1.hubspot.com/reports-list/26891171/258485427/"
 
 
 # ---------------------------------------------------------------------------
-# HubSpot — fetch all contacts created in the last 30 days
+# HubSpot - fetch all contacts created in the last 30 days
 # ---------------------------------------------------------------------------
 
 def fetch_all_contacts():
     """
-    Fetch contacts using only the createdate filter (filter 1).
+    Fetch contacts using only the createdate filter.
     Filters 2 and 3 are applied in Python to exactly match the report.
     """
     url = "https://api.hubapi.com/crm/v3/objects/contacts/search"
@@ -73,7 +77,7 @@ def fetch_all_contacts():
 
 
 # ---------------------------------------------------------------------------
-# Python-side filtering — replicates report filters 2 and 3 exactly
+# Python-side filtering - replicates report filters 2 and 3
 # ---------------------------------------------------------------------------
 
 def extract_domain(email):
@@ -92,9 +96,10 @@ def passes_filters(contact):
     if any(kw in domain for kw in EXCLUDED_DOMAIN_KEYWORDS):
         return False
 
-    # Filter 3: recent conversion must be in allowed list OR unknown (null/empty)
+    # Filter 3: recent conversion must CONTAIN one of the allowed substrings
+    #           OR be unknown (null/empty). Mirrors HubSpot's "contains" operator.
     conversion = (props.get("recent_conversion_event_name") or "").strip().lower()
-    if conversion and conversion not in ALLOWED_CONVERSIONS:
+    if conversion and not any(kw in conversion for kw in ALLOWED_CONVERSION_SUBSTRINGS):
         return False
 
     return True
@@ -108,6 +113,20 @@ def compute_domain_counts(contacts):
         if domain:
             counts[domain] = counts.get(domain, 0) + 1
     return counts
+
+
+def log_conversion_sample(all_contacts, max_samples=20):
+    """Print a sample of unique conversion event names to aid debugging."""
+    seen = {}
+    for c in all_contacts:
+        val = (c.get("properties", {}).get("recent_conversion_event_name") or "").strip()
+        if val not in seen:
+            seen[val] = 0
+        seen[val] += 1
+    print(f"  Unique conversion values seen ({len(seen)} total):")
+    for val, cnt in sorted(seen.items(), key=lambda x: -x[1])[:max_samples]:
+        label = repr(val) if val else "(null/empty)"
+        print(f"    {label}: {cnt} contact(s)")
 
 
 # ---------------------------------------------------------------------------
@@ -137,13 +156,13 @@ def save_state(all_domains):
 
 def send_slack_alert(new_domains, domain_counts):
     count = len(new_domains)
-    heading = "🚨 *New trial domain" + ("s" if count > 1 else "") + " detected in BEAMON*"
+    heading = "New trial domain" + ("s" if count > 1 else "") + " detected in BEAMON"
     lines = "\n".join(
-        "• `" + d + "` — " + str(domain_counts.get(d, "?")) + " contact(s)"
+        "- " + d + " - " + str(domain_counts.get(d, "?")) + " contact(s)"
         for d in sorted(new_domains)
     )
     text = (
-        heading + "\n\n" +
+        "*" + heading + "*\n\n" +
         "The following email domain" + ("s" if count > 1 else "") +
         " ha" + ("ve" if count > 1 else "s") +
         " appeared in the *Signups by Email Domain* report:\n\n" +
@@ -167,6 +186,9 @@ def main():
     all_contacts = fetch_all_contacts()
     print(f"  {len(all_contacts)} contact(s) returned by API.")
 
+    # Debug: show sample of conversion event names before filtering
+    log_conversion_sample(all_contacts)
+
     # Apply filters 2 and 3 in Python
     filtered = [c for c in all_contacts if passes_filters(c)]
     print(f"  {len(filtered)} contact(s) after applying report filters.")
@@ -185,12 +207,21 @@ def main():
     if is_first_run:
         print("First run - seeding state file. No Slack alerts will be sent.")
     elif new_domains:
-        print(f"  New domain(s): {sorted(new_domains)}")
-        send_slack_alert(new_domains, domain_counts)
+        # Only alert for domains with >= MIN_CONTACTS_FOR_ALERT contacts
+        alertable = {d for d in new_domains if domain_counts.get(d, 0) >= MIN_CONTACTS_FOR_ALERT}
+        skipped = new_domains - alertable
+        if skipped:
+            print(f"  Skipping {len(skipped)} new domain(s) below threshold: {sorted(skipped)}")
+        if alertable:
+            print(f"  Alerting for {len(alertable)} domain(s): {sorted(alertable)}")
+            send_slack_alert(alertable, domain_counts)
+        else:
+            print("  New domains found but all below alert threshold.")
     else:
         print("  No new domains found.")
 
     save_state(known_domains | current_domains)
+
 
 if __name__ == "__main__":
     main()
