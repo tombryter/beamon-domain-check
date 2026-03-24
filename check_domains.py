@@ -24,7 +24,7 @@ HUBSPOT_API_TOKEN = os.environ["HUBSPOT_API_TOKEN"]
 SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "")
 STATE_FILE = "known_domains.json"
 
-EXCLUDED_DOMAIN_KEYWORDS = ["gmail", "hotmail", "bryter", "icloud", "googlemail", "outlook.com", "yahoo"]
+EXCLUDED_DOMAIN_KEYWORDS = ["gmail", "hotmail", "bryter", "icloud", "googlemail", "outlook.com", "yahoo.com", "web.de", "yahoo.de", "gmx.de"]
 # HubSpot "contains" is substring matching - we replicate that here
 ALLOWED_CONVERSION_SUBSTRINGS = ["hubspot signup", "hubspot-signup", "bryter: f130"]
 # Only alert for domains with this many contacts or more
