@@ -16,7 +16,7 @@ import requests
 from datetime import datetime, timedelta, timezone
 
 HUBSPOT_API_TOKEN = os.environ["HUBSPOT_API_TOKEN"]
-SLACK_WEBHOOK_URL = os.environ["SLACK_WEBHOOK_URL"]
+SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "")
 STATE_FILE = "known_domains.json"
 
 EXCLUDED_DOMAIN_KEYWORDS = ["gmail", "hotmail", "bryter", "icloud", "googlemail", "outlook.com"]
@@ -35,7 +35,7 @@ def build_filter_groups():
         {"propertyName": "createdate", "operator": "GTE", "value": str(thirty_days_ago_ms)}
     ]
     for keyword in EXCLUDED_DOMAIN_KEYWORDS:
-        base_filters.append({"propertyName": "email", "operator": "NOT_CONTAINS", "value": keyword})
+        base_filters.append({"propertyName": "email", "operator": "NOT_CONTAINS_TOKEN", "value": keyword})
 
     group_a = {
         "filters": base_filters + [
@@ -65,6 +65,8 @@ def fetch_all_contacts():
         if after:
             payload["after"] = after
         resp = requests.post(url, headers=headers, json=payload, timeout=30)
+        if not resp.ok:
+            print(f"HubSpot API error {resp.status_code}: {resp.text}")
         resp.raise_for_status()
         data = resp.json()
         contacts.extend(data.get("results", []))
@@ -131,14 +133,19 @@ def send_slack_alert(new_domains, domain_counts):
         for d in sorted(new_domains)
     )
     text = (
-        heading + "\n\n"
-        "The following email domain" + ("s" if count > 1 else "") + " ha" +
-        ("ve" if count > 1 else "s") + " appeared in the *Signups by Email Domain* report:\n\n" +
+        heading + "\n\n" +
+        "The following email domain" + ("s" if count > 1 else "") +
+        " ha" + ("ve" if count > 1 else "s") +
+        " appeared in the *Signups by Email Domain* report:\n\n" +
         lines + "\n\n<" + REPORT_URL + "|View the full report>"
     )
-    resp = requests.post(SLACK_WEBHOOK_URL, json={"text": text}, timeout=10)
-    resp.raise_for_status()
-    print("Slack alert sent for: " + str(sorted(new_domains)))
+    if SLACK_WEBHOOK_URL:
+        resp = requests.post(SLACK_WEBHOOK_URL, json={"text": text}, timeout=10)
+        resp.raise_for_status()
+        print("Slack alert sent for: " + str(sorted(new_domains)))
+    else:
+        print("--- DRY RUN (SLACK_WEBHOOK_URL not set) ---")
+        print("Would have sent:\n" + text)
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +159,8 @@ def main():
     domain_counts = compute_domain_counts(contacts)
     current_domains = set(domain_counts.keys())
     print(f"  {len(current_domains)} unique domain(s) after filtering.")
+    for d, c in sorted(domain_counts.items()):
+        print(f"    {d}: {c}")
     state = load_state()
     known_domains = set(state.get("known_domains", []))
     is_first_run = not known_domains
