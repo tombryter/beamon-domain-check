@@ -1,4 +1,32 @@
 {
-  "known_domains": [],
-  "last_checked": null
+  "known_domains": [
+    "akm-berlin.de",
+    "anwaltskanzlei-tank.de",
+    "anwaltteam.at",
+    "botstart.de",
+    "chello.at",
+    "faber-castell.com",
+    "grafisola.at",
+    "gruendelpartner.de",
+    "hgra.de",
+    "huber-ra.at",
+    "hww.eu",
+    "ihr-anwalt.at",
+    "kennedyslaw.com",
+    "kohl-law.eu",
+    "lcb.legal",
+    "lindner-rock.at",
+    "ltslohmann.com",
+    "privaterelay.appleid.com",
+    "proton.me",
+    "ra-michaelis.de",
+    "ramartin.de",
+    "rdr.legal",
+    "roeber-hess.de",
+    "schiedermair.com",
+    "vialto.com",
+    "weareplanet.com",
+    "web-partner.de"
+  ],
+  "last_checked": "2026-03-24T16:23:27.834556+00:00"
 }
