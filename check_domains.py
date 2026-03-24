@@ -156,9 +156,9 @@ def save_state(all_domains):
 
 def send_slack_alert(new_domains, domain_counts):
     count = len(new_domains)
-    heading = "🚨 New duplicate trial domains detected 🚨"
+    heading = "🤖 New duplicate trial domains detected 🤖"
     lines = "\n".join(
-        "- " + d + " - " + str(domain_counts.get(d, "?")) + " contact(s)"
+        "- " + d + " - " + str(domain_counts.get(d, "?")) + " contacts"
         for d in sorted(new_domains)
     )
     text = (
