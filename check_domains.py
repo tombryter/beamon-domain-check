@@ -2,44 +2,36 @@
 BEAMON - Signups by Email Domain checker
 Replicates the HubSpot report filters and alerts #sales_inbound on Slack
 when a new email domain appears in the results.
-
 Filters applied (matching the HubSpot report):
   1. Create date in the last 30 days
   2. Email domain doesn't contain: gmail, hotmail, bryter, icloud, googlemail, outlook.com
   3. Recent conversion CONTAINS any of: "hubspot signup", "hubspot-signup", "BRYTER: F130"
      OR Recent conversion is unknown (null or empty)
-
-All 3 filters are applied in Python after fetching from the API.
+  4. Latest Traffic Source is NOT "Offline sources"
+All 4 filters are applied in Python after fetching from the API.
 Filter 3 uses substring matching (like HubSpot's "contains" operator).
-
 Slack alerts are only sent for new domains with >= 3 contacts in the report.
 """
-
 import os
 import json
 import requests
 from datetime import datetime, timedelta, timezone
-
 HUBSPOT_API_TOKEN = os.environ["HUBSPOT_API_TOKEN"]
 SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "")
 STATE_FILE = "known_domains.json"
-
 EXCLUDED_DOMAIN_KEYWORDS = ["gmail", "hotmail", "bryter", "icloud", "googlemail", "outlook.com", "yahoo.com", "web.de", "yahoo.de", "gmx.de"]
 # HubSpot "contains" is substring matching - we replicate that here
 ALLOWED_CONVERSION_SUBSTRINGS = ["hubspot signup", "hubspot-signup", "bryter: f130"]
 # Only alert for domains with this many contacts or more
 MIN_CONTACTS_FOR_ALERT = 3
 REPORT_URL = "https://app-eu1.hubspot.com/reports-list/26891171/258485427/"
-
-
 # ---------------------------------------------------------------------------
 # HubSpot - fetch all contacts created in the last 30 days
 # ---------------------------------------------------------------------------
-
 def fetch_all_contacts():
     """
     Fetch contacts using only the createdate filter.
-    Filters 2 and 3 are applied in Python to exactly match the report.
+    Filters 2, 3, and 4 are applied in Python to exactly match the report.
     """
     url = "https://api.hubapi.com/crm/v3/objects/contacts/search"
     headers = {
@@ -59,7 +51,7 @@ def fetch_all_contacts():
     while True:
         payload = {
             "filterGroups": [filter_group],
-            "properties": ["email", "hs_email_domain", "recent_conversion_event_name"],
+            "properties": ["email", "hs_email_domain", "recent_conversion_event_name", "hs_latest_source"],
             "limit": 100,
         }
         if after:
@@ -74,37 +66,31 @@ def fetch_all_contacts():
         if not after:
             break
     return contacts
-
-
 # ---------------------------------------------------------------------------
-# Python-side filtering - replicates report filters 2 and 3
+# Python-side filtering - replicates report filters 2, 3, and 4
 # ---------------------------------------------------------------------------
-
 def extract_domain(email):
     if email and "@" in email:
         return email.split("@", 1)[1].lower().strip()
     return None
-
-
 def passes_filters(contact):
     props = contact.get("properties", {})
-
     # Filter 2: email domain must not contain excluded keywords
     domain = props.get("hs_email_domain") or extract_domain(props.get("email") or "")
     if not domain:
         return False
     if any(kw in domain for kw in EXCLUDED_DOMAIN_KEYWORDS):
         return False
-
     # Filter 3: recent conversion must CONTAIN one of the allowed substrings
     #           OR be unknown (null/empty). Mirrors HubSpot's "contains" operator.
     conversion = (props.get("recent_conversion_event_name") or "").strip().lower()
     if conversion and not any(kw in conversion for kw in ALLOWED_CONVERSION_SUBSTRINGS):
         return False
-
+    # Filter 4: exclude contacts whose Latest Traffic Source is "Offline sources"
+    latest_source = (props.get("hs_latest_source") or "").strip()
+    if latest_source == "Offline sources":
+        return False
     return True
-
-
 def compute_domain_counts(contacts):
     counts = {}
     for contact in contacts:
@@ -113,8 +99,6 @@ def compute_domain_counts(contacts):
         if domain:
             counts[domain] = counts.get(domain, 0) + 1
     return counts
-
-
 def log_conversion_sample(all_contacts, max_samples=20):
     """Print a sample of unique conversion event names to aid debugging."""
     seen = {}
@@ -127,19 +111,14 @@ def log_conversion_sample(all_contacts, max_samples=20):
     for val, cnt in sorted(seen.items(), key=lambda x: -x[1])[:max_samples]:
         label = repr(val) if val else "(null/empty)"
         print(f"    {label}: {cnt} contact(s)")
-
-
 # ---------------------------------------------------------------------------
 # State file
 # ---------------------------------------------------------------------------
-
 def load_state():
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE) as f:
             return json.load(f)
     return {"known_domains": [], "last_checked": None}
-
-
 def save_state(all_domains):
     state = {
         "known_domains": sorted(all_domains),
@@ -148,12 +127,9 @@ def save_state(all_domains):
     with open(STATE_FILE, "w") as f:
         json.dump(state, f, indent=2)
     print(f"State saved - {len(all_domains)} total known domain(s).")
-
-
 # ---------------------------------------------------------------------------
 # Slack
 # ---------------------------------------------------------------------------
-
 def send_slack_alert(new_domains, domain_counts):
     count = len(new_domains)
     heading = "🤖 New duplicate trial domains detected 🤖"
@@ -175,35 +151,27 @@ def send_slack_alert(new_domains, domain_counts):
     else:
         print("--- DRY RUN (SLACK_WEBHOOK_URL not set) ---")
         print("Would have sent:\n" + text)
-
-
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-
 def main():
     print("Fetching contacts from HubSpot (last 30 days)...")
     all_contacts = fetch_all_contacts()
     print(f"  {len(all_contacts)} contact(s) returned by API.")
-
     # Debug: show sample of conversion event names before filtering
     log_conversion_sample(all_contacts)
-
-    # Apply filters 2 and 3 in Python
+    # Apply filters 2, 3, and 4 in Python
     filtered = [c for c in all_contacts if passes_filters(c)]
     print(f"  {len(filtered)} contact(s) after applying report filters.")
-
     domain_counts = compute_domain_counts(filtered)
     current_domains = set(domain_counts.keys())
     print(f"  {len(current_domains)} unique domain(s).")
     for d, c in sorted(domain_counts.items()):
         print(f"    {d}: {c}")
-
     state = load_state()
     known_domains = set(state.get("known_domains", []))
     is_first_run = not known_domains
     new_domains = current_domains - known_domains
-
     if is_first_run:
         print("First run - seeding state file. No Slack alerts will be sent.")
     elif new_domains:
@@ -219,9 +187,6 @@ def main():
             print("  New domains found but all below alert threshold.")
     else:
         print("  No new domains found.")
-
     save_state(known_domains | current_domains)
-
-
 if __name__ == "__main__":
     main()
