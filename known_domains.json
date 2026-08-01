@@ -1,5 +1,6 @@
 {
   "known_domains": [
+    "1010.law",
     "111.com",
     "1507.de",
     "3s-p.de",
@@ -236,6 +237,7 @@
     "bortlaw.com",
     "botstart.de",
     "bppa.at",
+    "bpr.at",
     "bpv-huegel.com",
     "br-anwaelte.at",
     "braks.legal",
@@ -428,6 +430,7 @@
     "elil.eu",
     "elisabeth-vinzenz.de",
     "elisabethzick.at",
+    "elliman.com",
     "email.de",
     "emr-law.at",
     "emt-energiemontage.de",
@@ -491,6 +494,7 @@
     "floether-wissing.de",
     "fluesterbox.de",
     "fokus.law",
+    "folk.at",
     "forcher-mayr-kantner.at",
     "forstbw.de",
     "foxandfoxlaw.com",
@@ -1931,5 +1935,5 @@
     "zu-recht.at",
     "zundel.com"
   ],
-  "last_checked": "2026-07-31T08:52:05.016566+00:00"
+  "last_checked": "2026-08-01T08:23:21.747812+00:00"
 }
